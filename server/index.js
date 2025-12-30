@@ -9,7 +9,6 @@ try {
   });
 } catch (e) {
   // harmless if `app` is not defined yet
-  console.warn("Static serve snippet: app may not be defined yet", e && e.message);
 }
 // POST /api/upload/image  -> upload image(s)
 // POST /api/upload/csv    -> upload CSV
@@ -36,6 +35,7 @@ const upload = multer({ storage });
 const app = express();
 app.use(express.json());
 app.use("/uploads", express.static(UPLOAD_DIR));
+// Serve public static files and return index.html at root app.use(express.static(path.join(__dirname, "..", "public"))); app.get("/", (req, res) => { res.sendFile(path.join(__dirname, "..", "public", "index.html")); });
 
 // Simple in-memory store for uploaded files & parsed drafts (for prototype)
 const store = { images: [], parsedDrafts: [] };
