@@ -19,7 +19,6 @@ try {
 
 const express = require("express");
 const multer = require("multer");
-const path = require("path");
 const fs = require("fs");
 const { parseOcrImages } = require("./vision");
 const { allocateTimesAcrossAddresses } = require("./allocator");
