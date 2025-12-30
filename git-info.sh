@@ -28,4 +28,4 @@ echo ""
 echo "Remote Repositories:"
 git remote -v
 
-echo "==================================="
+echo "=================================="
