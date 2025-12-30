@@ -1,5 +1,16 @@
 ﻿// Minimal Express server scaffold
 // Endpoints:
+const path = require("path");
+// Serve static files from the public folder and return index.html at root
+try {
+  app.use(express.static(path.join(__dirname, "..", "public")));
+  app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+  });
+} catch (e) {
+  // harmless if `app` is not defined yet
+  console.warn("Static serve snippet: app may not be defined yet", e && e.message);
+}
 // POST /api/upload/image  -> upload image(s)
 // POST /api/upload/csv    -> upload CSV
 // POST /api/parse/ocr     -> run OCR on most recent uploaded image(s) (uses Google Vision if creds set)
@@ -114,3 +125,4 @@ return res.json({ ok: true, downloadUrl: url, filename });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
