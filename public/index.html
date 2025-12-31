@@ -20,11 +20,42 @@
     .small { font-size: 13px; }
     .download { margin-top: .5rem; display:block; }
     input[type="file"] { padding: .25rem; }
+    .flex { display:flex; gap:.5rem; align-items:center; }
   </style>
 </head>
 <body>
   <h1>Timesheet App — Simple UI</h1>
-  <p class="muted">Use this page to call the deployed API endpoints for preview, export, and to upload logs/files.</p>
+  <p class="muted">Upload an image (JPG/PNG) or paste text to parse logs into timesheet rows, preview, then export per-worker Excel files.</p>
+
+  <section>
+    <h2>Parse: Upload image (OCR)</h2>
+    <div class="row">
+      <input type="file" id="ocr-file" accept="image/*" />
+      <button id="parse-ocr-btn">Parse Image (OCR)</button>
+    </div>
+    <div id="ocr-result" class="result" style="display:none;">
+      <div><strong>OCR parse result</strong></div>
+      <pre id="ocr-preview" style="white-space:pre-wrap;margin-top:.5rem;"></pre>
+      <a id="ocr-download" class="download" href="#" style="display:none;">Preview download</a>
+    </div>
+  </section>
+
+  <hr/>
+
+  <section>
+    <h2>Parse: Paste text</h2>
+    <div class="row">
+      <div class="col">
+        <label for="text-input">Paste log text here</label>
+        <textarea id="text-input" placeholder="Paste your text logs here"></textarea>
+      </div>
+    </div>
+    <div class="row">
+      <button id="parse-text-btn">Parse Text</button>
+    </div>
+  </section>
+
+  <hr/>
 
   <section>
     <h2>Preview payload (JSON)</h2>
@@ -75,27 +106,21 @@
   <hr/>
 
   <section>
-    <h2>Upload a log or file</h2>
-    <div class="row">
-      <input type="file" id="upload-file" />
-      <button id="upload-btn">Upload</button>
-    </div>
-    <div id="upload-result" class="result" style="display:none;">
-      <div><strong>Upload result</strong></div>
-      <div id="upload-info" style="margin-top:.5rem;"></div>
-      <a id="upload-download" class="download" href="#" download style="display:none;">Download file</a>
-    </div>
-  </section>
-
-  <hr/>
-
-  <section>
     <h2>Diagnostics</h2>
     <div class="muted small">Requests are made to the same origin. If the API is unreachable from this page you will see errors below.</div>
     <pre id="log" style="background:#111;color:#fff;padding:.75rem;border-radius:6px;max-height:240px;overflow:auto;"></pre>
   </section>
 
   <script>
+    const ocrFile = document.getElementById('ocr-file');
+    const parseOcrBtn = document.getElementById('parse-ocr-btn');
+    const ocrResult = document.getElementById('ocr-result');
+    const ocrPreview = document.getElementById('ocr-preview');
+    const ocrDownload = document.getElementById('ocr-download');
+
+    const textInput = document.getElementById('text-input');
+    const parseTextBtn = document.getElementById('parse-text-btn');
+
     const payloadEl = document.getElementById('payload');
     const loadSampleBtn = document.getElementById('load-sample');
     const doPreviewBtn = document.getElementById('do-preview');
@@ -110,16 +135,59 @@
     const exportInfo = document.getElementById('export-info');
     const exportDownload = document.getElementById('export-download');
 
-    const uploadFileInput = document.getElementById('upload-file');
-    const uploadBtn = document.getElementById('upload-btn');
-    const uploadResult = document.getElementById('upload-result');
-    const uploadInfo = document.getElementById('upload-info');
-    const uploadDownload = document.getElementById('upload-download');
-
     const logEl = document.getElementById('log');
     function log(...args){ logEl.textContent += args.map(a=> (typeof a === 'object' ? JSON.stringify(a,null,2) : String(a))).join(' ') + '\\n'; logEl.scrollTop = logEl.scrollHeight; }
 
-    // Try to fetch preview_payload.json from server if present
+    parseOcrBtn.addEventListener('click', async () => {
+      ocrResult.style.display = 'none';
+      ocrPreview.textContent = '';
+      ocrDownload.style.display = 'none';
+      const f = ocrFile.files && ocrFile.files[0];
+      if (!f) { alert('Choose an image first'); return; }
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        log('Uploading image for OCR:', f.name);
+        const r = await fetch('/api/parse/ocr', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (!r.ok) {
+          log('OCR parse failed', data);
+          alert('OCR failed: ' + (data.message || JSON.stringify(data)));
+          return;
+        }
+        log('OCR parse response', data);
+        ocrResult.style.display = '';
+        ocrPreview.textContent = data.previewText || JSON.stringify(data.entries, null, 2);
+        // Show preview entries
+        previewDraft.textContent = 'draftId: ' + data.draftId;
+        renderEntries(data.entries || []);
+      } catch (err) {
+        log('OCR error', err.message);
+        alert('OCR error: ' + err.message);
+      }
+    });
+
+    parseTextBtn.addEventListener('click', async () => {
+      const txt = textInput.value;
+      if (!txt) { alert('Paste text in the textarea first'); return; }
+      try {
+        log('Parsing pasted text');
+        const r = await fetch('/api/parse/text', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ text: txt }) });
+        const data = await r.json();
+        if (!r.ok) {
+          log('Text parse failed', data);
+          alert('Parse failed: ' + (data.message || JSON.stringify(data)));
+          return;
+        }
+        log('Text parse response', data);
+        previewDraft.textContent = 'draftId: ' + data.draftId;
+        renderEntries(data.entries || []);
+      } catch (err) {
+        log('Parse error', err.message);
+        alert('Parse error: ' + err.message);
+      }
+    });
+
     loadSampleBtn.addEventListener('click', async () => {
       try {
         log('Fetching preview_payload.json ...');
@@ -130,11 +198,9 @@
         log('Loaded preview_payload.json');
       } catch (err) {
         log('Could not load preview_payload.json:', err.message);
-        // fallback sample
         payloadEl.value = JSON.stringify({
           entries: [
-            { worker: "Chris", date: "2025-12-29", address: "123 Main St", unit: "", start: "08:00", end: "12:00", totalHours: 4, materials: "", notes: "" },
-            { worker: "Chris", date: "2025-12-29", address: "456 Oak Ave", unit: "", start: "13:00", end: "17:00", totalHours: 4, materials: "", notes: "" }
+            { worker: "Chris", date: new Date().toISOString().slice(0,10), address: "123 Main St", unit: "", start: "08:00", end: "12:00", totalHours: 4, materials: "", notes: "" }
           ]
         }, null, 2);
         log('Inserted fallback sample payload.');
@@ -163,11 +229,7 @@
         log('Preview response:', data);
         previewResult.style.display = '';
         previewDraft.innerHTML = '<div><strong>draftId:</strong> ' + data.draftId + '</div>';
-        if (data.entries) {
-          renderEntries(data.entries);
-        } else if (data.results) {
-          renderEntries(data.results);
-        }
+        if (data.entries) renderEntries(data.entries);
       } catch (err) {
         log('Preview error:', err.message);
         previewResult.style.display = '';
@@ -175,13 +237,52 @@
       }
     });
 
+    doExportBtn.addEventListener('click', async () => {
+      exportResult.style.display = 'none';
+      exportInfo.textContent = '';
+      exportDownload.style.display = 'none';
+      try {
+        const draftText = previewDraft.textContent || '';
+        const m = draftText.match(/draftId[:]?\s*([0-9]+)/);
+        if (!m) { alert('No draftId found. Run a Preview/Parse first.'); return; }
+        const draftId = m[1];
+        const worker = workerEl.value || '';
+        const weekStartISO = weekEl.value || '';
+        const body = { draftId, worker };
+        if (weekStartISO) body.weekStartISO = weekStartISO;
+        log('POST /api/export', body);
+        const r = await fetch('/api/export', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const data = await r.json();
+        if (!r.ok) {
+          log('Export failed', data);
+          exportInfo.textContent = 'Error: ' + (data.message || JSON.stringify(data));
+          exportResult.style.display = '';
+          return;
+        }
+        log('Export response', data);
+        exportResult.style.display = '';
+        exportInfo.textContent = JSON.stringify(data, null, 2);
+        if (data.downloadUrl) {
+          const dl = data.downloadUrl.startsWith('http') ? data.downloadUrl : (location.origin + data.downloadUrl);
+          exportDownload.href = dl;
+          exportDownload.textContent = 'Download: ' + (data.filename || dl.split('/').pop()) + ' (' + (data.rowCount||0) + ' rows, ' + (data.fileSize? (Math.round(data.fileSize/1024) + " KB") : "unknown size") + ')';
+          exportDownload.style.display = 'inline-block';
+        }
+      } catch (err) {
+        log('Export error', err.message);
+        exportResult.style.display = '';
+        exportInfo.textContent = 'Error: ' + err.message;
+      }
+    });
+
     function renderEntries(entries) {
+      previewResult.style.display = '';
       if (!entries || !entries.length) { previewEntries.innerHTML = '<div class="muted">No entries returned.</div>'; return; }
       let html = '<table><thead><tr><th>Worker</th><th>Date</th><th>Address</th><th>Start</th><th>End</th><th>Hours</th></tr></thead><tbody>';
       for (const e of entries) {
-        const worker = e.worker || e.image?.originalname || '';
+        const worker = e.worker || '';
         const date = e.date || '';
-        const address = e.address || (e.parsed && e.parsed.address) || '';
+        const address = e.address || '';
         const start = e.start || '';
         const end = e.end || '';
         const hours = e.totalHours || e.hours || '';
@@ -190,99 +291,6 @@
       html += '</tbody></table>';
       previewEntries.innerHTML = html;
     }
-
-    doExportBtn.addEventListener('click', async () => {
-      exportResult.style.display = 'none';
-      exportInfo.textContent = '';
-      exportDownload.style.display = 'none';
-      try {
-        let draftId = null;
-        const text = previewDraft.textContent || '';
-        const m = text.match(/draftId['"]?:?\s*([0-9]+)/) || text.match(/draftId:\s*([0-9]+)/);
-        if (m) draftId = m[1];
-
-        if (!draftId) {
-          draftId = prompt('No draftId found from preview. Please enter draftId (or cancel):');
-          if (!draftId) {
-            log('Export aborted: no draftId');
-            return;
-          }
-        }
-
-        const worker = workerEl.value || 'Chris';
-        const weekStartISO = weekEl.value || new Date().toISOString().slice(0,10);
-
-        const body = { draftId, worker, weekStartISO };
-        log('POST /api/export', body);
-        const r = await fetch('/api/export', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        const data = await r.json();
-        if (!r.ok) {
-          log('Export failed:', data);
-          exportInfo.textContent = 'Error: ' + (data.message || JSON.stringify(data));
-          exportResult.style.display = '';
-          return;
-        }
-        log('Export response:', data);
-        exportResult.style.display = '';
-        exportInfo.textContent = JSON.stringify(data, null, 2);
-
-        if (data.downloadUrl) {
-          const dlUrl = data.downloadUrl.startsWith('http') ? data.downloadUrl : (location.origin + data.downloadUrl);
-          exportDownload.href = dlUrl;
-          exportDownload.textContent = 'Download: ' + (data.filename || dlUrl.split('/').pop());
-          exportDownload.style.display = 'inline-block';
-        }
-      } catch (err) {
-        log('Export error:', err.message);
-        exportResult.style.display = '';
-        exportInfo.textContent = 'Error: ' + err.message;
-      }
-    });
-
-    uploadBtn.addEventListener('click', async () => {
-      uploadResult.style.display = 'none';
-      uploadInfo.textContent = '';
-      uploadDownload.style.display = 'none';
-      const f = uploadFileInput.files && uploadFileInput.files[0];
-      if (!f) { alert('Choose a file first'); return; }
-      try {
-        const fd = new FormData();
-        fd.append('file', f);
-        log('Uploading', f.name);
-        const r = await fetch('/api/upload/csv', { method: 'POST', body: fd });
-        const data = await r.json();
-        if (!r.ok) {
-          log('Upload failed', data);
-          uploadInfo.textContent = 'Error: ' + (data.message || JSON.stringify(data));
-          uploadResult.style.display = '';
-          return;
-        }
-        log('Upload response', data);
-        uploadResult.style.display = '';
-        uploadInfo.textContent = JSON.stringify(data, null, 2);
-        // prefer explicit url returned by server, otherwise construct from path
-        if (data.url) {
-          const dl = data.url.startsWith('http') ? data.url : (location.origin + data.url);
-          uploadDownload.href = dl;
-          uploadDownload.textContent = 'Download: ' + (data.filename || dl.split('/').pop());
-          uploadDownload.style.display = 'inline-block';
-        } else if (data.path) {
-          const filename = data.path.split('/').pop();
-          const dl = location.origin + '/uploads/' + filename;
-          uploadDownload.href = dl;
-          uploadDownload.textContent = 'Download: ' + filename;
-          uploadDownload.style.display = 'inline-block';
-        }
-      } catch (err) {
-        log('Upload error', err.message);
-        uploadResult.style.display = '';
-        uploadInfo.textContent = 'Error: ' + err.message;
-      }
-    });
 
     function escapeHtml(s) {
       if (s == null) return '';
