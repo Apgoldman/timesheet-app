@@ -1,1 +1,49 @@
-{ "entries": [ { "worker": "Chris", "date": "2025-12-29", "address": "1513 Lafayette", "unit": "", "start": "09:00", "end": "17:30", "totalHours": 8, "materials": 10, "notes": "Checked water pressure" }, { "worker": "Jose", "date": "2025-12-29", "address": "1513 Lafayette", "unit": "", "start": "09:00", "end": "17:30", "totalHours": 8, "materials": 10, "notes": "Checked water pressure" } ] }
+﻿{
+  "entries": [
+    {
+      "worker": "Chris",
+      "date": "2025-12-29",
+      "address": "123 Main St",
+      "unit": "",
+      "start": "08:00",
+      "end": "12:00",
+      "totalHours": 4,
+      "materials": "",
+      "notes": "Routine maintenance"
+    },
+    {
+      "worker": "Chris",
+      "date": "2025-12-29",
+      "address": "456 Oak Ave",
+      "unit": "",
+      "start": "13:00",
+      "end": "17:00",
+      "totalHours": 4,
+      "materials": "",
+      "notes": "Repaired leak"
+    },
+    {
+      "worker": "Myer",
+      "date": "2025-12-11",
+      "address": "Office, 103 Spring St",
+      "unit": "",
+      "notes": "pickup helper, helper 4hrs. 48.00"
+    },
+    {
+      "worker": "Myer",
+      "date": "2025-12-11",
+      "address": "217-219 W. Market",
+      "unit": "",
+      "notes": "stop at 2"
+    },
+    {
+      "worker": "Damian",
+      "date": "2025-12-10",
+      "address": "42 Carbondale",
+      "unit": "",
+      "start": "09:00",
+      "end": "17:30",
+      "notes": "Leaking shower. Gas: $35"
+    }
+  ]
+}

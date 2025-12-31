@@ -1,13 +1,12 @@
-﻿// Minimal Express server scaffold
-// Endpoints: upload images/csv, parse OCR, preview, export
+﻿// server/index.js (updated)
+// Uses allocator (distance-based), payroll, and exporter modules.
 
 const path = require("path");
 const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
-const { parseOcrImages } = require("./vision");
-const { allocateTimesAcrossAddresses } = require("./allocator");
-const { generateWorkerExcel } = require("./exporter");
+const { allocateTimesAcrossAddresses } = require("../lib/allocator");
+const { generateWorkerExcel } = require("../lib/exporter");
 
 const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -30,104 +29,61 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
-// Simple in-memory store for uploaded files & parsed drafts (for prototype)
-const store = { images: [], parsedDrafts: [] };
+// In-memory store for prototype
+const store = { parsedDrafts: [] };
 
-app.post("/api/upload/image", upload.array("images", 12), (req, res) => {
-  const files = req.files.map(f => ({ path: f.path, originalname: f.originalname }));
-  store.images.push(...files);
-  return res.json({ ok: true, images: files });
-});
-
+// Upload CSV or any file — return server path and public url
 app.post("/api/upload/csv", upload.single("file"), (req, res) => {
-  // For prototype, return file path — parsing CSV mapping will be added in full app
-  return res.json({ ok: true, path: req.file.path });
+  if (!req.file) return res.status(400).json({ ok: false, message: "file required" });
+  const savedPath = req.file.path;
+  const basename = path.basename(savedPath);
+  const publicUrl = `/uploads/${basename}`;
+  return res.json({ ok: true, path: savedPath, url: publicUrl, filename: basename });
 });
 
-app.post("/api/parse/ocr", async (req, res) => {
-  // parse all currently uploaded images
-  if (!store.images.length) return res.status(400).json({ ok: false, message: "No images uploaded" });
+// Preview endpoint — normalize and allocate; returns entries array and draftId
+app.post("/api/preview", async (req, res) => {
   try {
-    const results = [];
-    for (const img of store.images) {
-      const parsed = await parseOcrImages(img.path); // returns parsed text & candidate fields
-      results.push({ image: img, parsed });
-    }
-    // store a draft for user to review (in real app, persist to DB)
-    const draft = { id: Date.now().toString(), timestamp: new Date(), results };
-    store.parsedDrafts.push(draft);
-    return res.json({ ok: true, draftId: draft.id, results });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
+    const { entries } = req.body;
+    if (!entries || !Array.isArray(entries)) return res.status(400).json({ ok: false, message: "entries required" });
 
-app.post("/api/preview", (req, res) => {
-  // Accept parsed/edited entries from frontend and run allocation heuristics if needed.
-  // Body shape: { entries: [ { worker, date, address, unit, start, end, totalHours, materials, notes } ] }
-  const { entries } = req.body;
-  if (!entries || !Array.isArray(entries)) return res.status(400).json({ ok: false, message: "entries required" });
-  try {
-    // If some rows only have totalHours and multiple addresses same day, allocate using allocator.
-    const allocated = allocateTimesAcrossAddresses(entries, process.env.GOOGLE_MAPS_API_KEY || null, { tz: process.env.TZ || "America/New_York" });
+    const googleKey = process.env.GOOGLE_MAPS_API_KEY || null;
+    const tz = process.env.TZ || "America/New_York";
 
-    // Normalize allocated -> ensure an array is returned
-    let entriesToReturn = [];
-    if (Array.isArray(allocated)) {
-      entriesToReturn = allocated;
-    } else if (allocated && Array.isArray(allocated.entries)) {
-      entriesToReturn = allocated.entries;
-    } else {
-      // fallback: if allocator returned an object keyed by something, try to extract arrays
-      entriesToReturn = Array.isArray(entries) ? entries : [];
-    }
+    const allocated = await allocateTimesAcrossAddresses(entries, googleKey, { tz });
 
-    // Save allocated draft for export
     const draftId = Date.now().toString();
-    store.parsedDrafts.push({ id: draftId, timestamp: new Date(), entries: entriesToReturn });
-    return res.json({ ok: true, draftId, entries: entriesToReturn });
+    store.parsedDrafts.push({ id: draftId, timestamp: new Date(), entries: allocated });
+    return res.json({ ok: true, draftId, entries: allocated });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false, message: err.message });
+    console.error("Preview error:", err);
+    return res.status(500).json({ ok: false, message: err.message || "Preview failed" });
   }
 });
 
+// Export single worker for a week
 app.post("/api/export", async (req, res) => {
-  // body: { draftId, worker, weekStartISO }
-  const { draftId, worker, weekStartISO } = req.body;
-  if (!draftId) return res.status(400).json({ ok: false, message: "draftId required" });
-
-  const draft = store.parsedDrafts.find(d => d.id === draftId);
-  if (!draft) return res.status(404).json({ ok: false, message: "Draft not found" });
-
   try {
-    // generateWorkerExcel may return a string path or an object { path, filename } — handle both
-    const result = await generateWorkerExcel(draft.entries, worker, weekStartISO, { outDir: path.join(__dirname, "..", "output") });
+    const { draftId, worker, weekStartISO } = req.body;
+    if (!draftId) return res.status(400).json({ ok: false, message: "draftId required" });
 
-    // determine file path
-    let filepath = null;
-    if (typeof result === "string") {
-      filepath = result;
-    } else if (result && typeof result === "object") {
-      filepath = result.path || result.filepath || result.filename && path.join(path.join(__dirname, "..", "output"), result.filename);
-    }
+    const draft = store.parsedDrafts.find(d => d.id === draftId);
+    if (!draft) return res.status(404).json({ ok: false, message: "Draft not found" });
 
-    if (!filepath) {
-      console.error("Exporter returned unexpected result:", result);
-      return res.status(500).json({ ok: false, message: "Exporter did not return a file path" });
-    }
+    // generate file
+    const outDir = path.join(__dirname, "..", "output");
+    const filepath = await generateWorkerExcel(draft.entries, worker, weekStartISO, { outDir });
+
+    if (!filepath) return res.status(500).json({ ok: false, message: "Exporter failed to produce file" });
 
     const filename = path.basename(filepath);
     const url = `/download/${filename}`;
 
-    // Register a download route for this specific file path. Use a closure to capture filepath.
-    // If a route already exists for this url, remove and re-register: (simple approach — append once)
-    // Note: For prototype only — in production use unique filenames + persistent storage.
+    // register a download route for this generated file
     app.get(url, (req2, res2) => {
-      res2.download(filepath, filename, (err) => {
+      res2.download(filepath, filename, err => {
         if (err) {
-          console.error("Download error for", filepath, err);
+          console.error("Download error:", err);
           if (!res2.headersSent) res2.status(500).send("Download failed");
         }
       });
